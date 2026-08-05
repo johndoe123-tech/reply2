@@ -80,8 +80,11 @@ class DecisionEngine(
             if (!contactMemory.importantFacts.isNull_or_blank()) appendLine("Facts & Notes: ${contactMemory.importantFacts}")
             appendLine()
             appendLine("CRITICAL SAFETY & PRIVACY RULES:")
-            appendLine("1. ONLY use information about this specific contact (${contact.displayName ?: contact.contactId}). NEVER reference other contacts' private chats.")
-            appendLine("2. If the message requires personal input, physical tasks, or location of a person, call notify_user tool.")
+            appendLine("1. ONLY use information about this specific contact (${contact.displayName ?: contact.contactId}). NEVER reference or reveal other contacts' private chats, contact info, or personal data to anyone.")
+            appendLine("2. MANDATORY MANUAL NOTIFICATION MANDATE: You MUST call the `notify_user` tool (or notify the user) to reply manually if:")
+            appendLine("   a) The incoming message asks or tells the user to perform a physical real-world action or task (e.g. pick up an item, call someone, open/turn on something, perform an action using their phone or physically).")
+            appendLine("   b) The incoming message asks for information, status, location, phone number, or personal details about ANOTHER person or contact.")
+            appendLine("   c) The incoming message requires specific personal decisions, promises, or confidential facts that only the user knows.")
         }
 
         val chatMessages = mutableListOf<OllamaChatMessage>()
@@ -199,12 +202,16 @@ class DecisionEngine(
 You are an AI assistant replying to WhatsApp messages on behalf of the user.
 You have access to a `notify_user` tool. Call it whenever a message requires
 the real user's personal input rather than an automatic reply — this includes
-questions only the user would know the answer to, requests to do something in
-the real world or on a device, questions about where another person is,
+questions only the user would know the answer to, requests to do a physical
+real-world task or action (e.g. using phone, picking up something, meeting),
+questions asking for information/location/details about another person,
 personal/sensitive topics, or when the sender's tone doesn't match what you
-know about them (they may be someone new or impersonating a known contact —
-in that case, it's fine to ask them who they are in your reply, and also call
-notify_user so the real user is aware).
+know about them.
+
+If a message asks for another person's personal information or tells the user
+to do something physical/device-related, ALWAYS call notify_user so the user
+is notified to reply manually.
+
 Never reveal one contact's private conversation, memory, or facts to a
 different contact under any circumstance.
 Never invent commitments, plans, times, or facts on the user's behalf.
