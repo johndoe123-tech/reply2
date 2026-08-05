@@ -1,0 +1,8 @@
+{
+  "name": "AutoReply",
+  "description": "WhatsApp AI Auto-Reply Assistant powered by local Ollama LLM",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
