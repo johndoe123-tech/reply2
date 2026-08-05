@@ -67,6 +67,15 @@
             </intent-filter>
         </receiver>
 
+        <!-- Receiver for direct inline notification replies -->
+        <receiver
+            android:name=".service.DirectReplyReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.ACTION_DIRECT_REPLY" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

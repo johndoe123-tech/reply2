@@ -134,6 +134,11 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
 
                 val contactId = resolvedName
 
+                // Store reply action in cache if available for inline notification replies
+                if (pendingIntent != null && remoteInput != null) {
+                    WhatsAppReplyCache.store(contactId, pendingIntent, remoteInput)
+                }
+
                 // Upsert Contact
                 var contact = db.contactDao().getContactById(contactId)
                 if (contact == null) {

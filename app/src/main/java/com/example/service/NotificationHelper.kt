@@ -40,6 +40,7 @@ object NotificationHelper {
     fun postAutoReplyNotification(context: Context, contactName: String, incomingText: String, replyText: String) {
         createChannels(context)
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationId = (System.currentTimeMillis() % 100000).toInt()
 
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -48,6 +49,32 @@ object NotificationHelper {
             context, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+
+        // Setup Direct Reply Action
+        val replyIntent = Intent(context, DirectReplyReceiver::class.java).apply {
+            action = DirectReplyReceiver.ACTION_DIRECT_REPLY
+            putExtra(DirectReplyReceiver.EXTRA_CONTACT_ID, contactName)
+            putExtra(DirectReplyReceiver.EXTRA_NOTIFICATION_ID, notificationId)
+        }
+        val replyPendingIntent = PendingIntent.getBroadcast(
+            context,
+            notificationId,
+            replyIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        )
+
+        val remoteInput = androidx.core.app.RemoteInput.Builder(DirectReplyReceiver.KEY_TEXT_REPLY)
+            .setLabel("Reply to $contactName...")
+            .build()
+
+        val replyAction = NotificationCompat.Action.Builder(
+            android.R.drawable.ic_menu_send,
+            "Reply Directly",
+            replyPendingIntent
+        )
+            .addRemoteInput(remoteInput)
+            .setAllowGeneratedReplies(true)
+            .build()
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ACTIVITY_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
@@ -58,17 +85,18 @@ object NotificationHelper {
                     .bigText("Incoming from $contactName:\n\"$incomingText\"\n\nAI Auto-Reply Sent:\n\"$replyText\"")
             )
             .setContentIntent(pendingIntent)
+            .addAction(replyAction)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
             .build()
 
-        val notificationId = (System.currentTimeMillis() % 100000).toInt()
         notificationManager.notify(notificationId, notification)
     }
 
     fun postUserAlertNotification(context: Context, contactName: String, incomingText: String, reason: String) {
         createChannels(context)
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationId = (System.currentTimeMillis() % 100000).toInt() + 50000
 
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -78,20 +106,46 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        // Setup Direct Reply Action
+        val replyIntent = Intent(context, DirectReplyReceiver::class.java).apply {
+            action = DirectReplyReceiver.ACTION_DIRECT_REPLY
+            putExtra(DirectReplyReceiver.EXTRA_CONTACT_ID, contactName)
+            putExtra(DirectReplyReceiver.EXTRA_NOTIFICATION_ID, notificationId)
+        }
+        val replyPendingIntent = PendingIntent.getBroadcast(
+            context,
+            notificationId,
+            replyIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        )
+
+        val remoteInput = androidx.core.app.RemoteInput.Builder(DirectReplyReceiver.KEY_TEXT_REPLY)
+            .setLabel("Reply to $contactName...")
+            .build()
+
+        val replyAction = NotificationCompat.Action.Builder(
+            android.R.drawable.ic_menu_send,
+            "Reply Directly",
+            replyPendingIntent
+        )
+            .addRemoteInput(remoteInput)
+            .setAllowGeneratedReplies(true)
+            .build()
+
         val notification = NotificationCompat.Builder(context, CHANNEL_ALERT_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle("New message from $contactName needs your reply")
             .setContentText("\"$incomingText\" • $reason")
             .setStyle(
                 NotificationCompat.BigTextStyle()
-                    .bigText("Incoming from $contactName:\n\"$incomingText\"\n\nReason / Tool Call Alert:\n$reason")
+                    .bigText("Incoming from $contactName:\n\"$incomingText\"\n\nReason / Alert:\n$reason")
             )
             .setContentIntent(pendingIntent)
+            .addAction(replyAction)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .build()
 
-        val notificationId = (System.currentTimeMillis() % 100000).toInt() + 50000
         notificationManager.notify(notificationId, notification)
     }
 }
