@@ -83,13 +83,14 @@ class ContactResolver(private val context: Context) {
                 while (it.moveToNext()) {
                     val name = if (nameCol != -1) it.getString(nameCol) else null
                     val number = if (numCol != -1) it.getString(numCol) else null
-                    val id = if (idCol != -1) it.getString(idCol) else java.util.UUID.randomUUID().toString()
-
+                    val rawId = if (idCol != -1) it.getString(idCol) else java.util.UUID.randomUUID().toString()
                     val displayName = name?.trim() ?: number?.trim() ?: continue
-                    val key = "$displayName|${number?.trim()}"
+                    val cleanNum = number?.trim() ?: ""
+                    val uniqueId = "${rawId}_${cleanNum}"
+                    val key = "$displayName|$cleanNum"
 
                     if (seen.add(key)) {
-                        list.add(DeviceContact(id = id, name = displayName, phoneNumber = number?.trim()))
+                        list.add(DeviceContact(id = uniqueId, name = displayName, phoneNumber = if (cleanNum.isBlank()) null else cleanNum))
                     }
                 }
             }

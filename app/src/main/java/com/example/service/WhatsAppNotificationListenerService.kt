@@ -113,13 +113,20 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
         }
 
         // 2. Capture WhatsApp RemoteInput & PendingIntent for quick reply
-        val (pendingIntent, remoteInput) = findReplyAction(notification)
+        var (pendingIntent, remoteInput) = findReplyAction(notification)
         if (pendingIntent == null || remoteInput == null) {
-            Log.w(TAG, "No RemoteInput reply action found in notification for $rawTitle")
+            Log.w(TAG, "No direct RemoteInput reply action found in notification for $rawTitle")
         }
 
         serviceScope.launch {
             try {
+                // Ensure foreground control service is running
+                try {
+                    AutoReplyForegroundService.startService(this@WhatsAppNotificationListenerService)
+                } catch (e: Exception) {
+                    // ignore start failure if already running
+                }
+
                 // Check if Auto-Reply is globally enabled
                 val prefs = prefsRepo.userPreferencesFlow.first()
                 if (!prefs.autoReplyEnabled) {
@@ -134,9 +141,19 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
 
                 val contactId = resolvedName
 
-                // Store reply action in cache if available for inline notification replies
-                if (pendingIntent != null && remoteInput != null) {
-                    WhatsAppReplyCache.store(contactId, pendingIntent, remoteInput)
+                // Store reply action in cache if available, or retrieve cached action for background reply
+                var activePendingIntent = pendingIntent
+                var activeRemoteInput = remoteInput
+
+                if (activePendingIntent != null && activeRemoteInput != null) {
+                    WhatsAppReplyCache.store(contactId, activePendingIntent, activeRemoteInput)
+                } else {
+                    val cached = WhatsAppReplyCache.get(contactId)
+                    if (cached != null) {
+                        activePendingIntent = cached.pendingIntent
+                        activeRemoteInput = cached.remoteInput
+                        Log.i(TAG, "Using cached WhatsApp RemoteInput reply action for $contactId")
+                    }
                 }
 
                 // Upsert Contact
@@ -194,8 +211,10 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
 
                 when (decision) {
                     is DecisionResult.AutoReply -> {
-                        if (pendingIntent != null && remoteInput != null) {
-                            val success = sendWhatsAppReply(pendingIntent, remoteInput, decision.replyText)
+                        val finalPI = activePendingIntent
+                        val finalRI = activeRemoteInput
+                        if (finalPI != null && finalRI != null) {
+                            val success = sendWhatsAppReply(finalPI, finalRI, decision.replyText)
                             if (success) {
                                 // Insert outgoing reply into DB
                                 val replyMsg = Message(
@@ -262,29 +281,22 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
     }
 
     private fun isGroupChat(title: String, text: String, extras: Bundle, flags: Int): Boolean {
-        // 1. WhatsApp explicit group conversation flag
-        if (extras.getBoolean("android.isGroupConversation", false)) {
+        // 1. Explicit Android system flags for group conversations
+        if (extras.getBoolean("android.isGroupConversation", false) ||
+            extras.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false)) {
             return true
         }
 
-        // 2. Check if conversation title differs from notification title
-        val conversationTitle = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()?.trim()
-        val extraTitle = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim()
-        if (!conversationTitle.isNull_or_blank() && conversationTitle != title && conversationTitle != extraTitle) {
-            return true
-        }
-
-        // 3. Check for group summary flag
+        // 2. Check for group summary container notification
         if ((flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
             return true
         }
 
-        // 4. Last resort fallback for group chats:
-        // In group chats, title is the Group Name, and text starts with "Sender: message"
-        // Only trigger if conversationTitle is explicitly present (group title) AND text prefix differs from title.
-        if (text.contains(":") && !text.startsWith("http")) {
-            val prefix = text.substringBefore(":").trim()
-            if (prefix.isNotEmpty() && prefix != title && !conversationTitle.isNull_or_blank()) {
+        // 3. Check for WhatsApp group conversation title key
+        val hiddenTitle = extras.getCharSequence("android.hiddenConversationTitle")?.toString()?.trim()
+        if (!hiddenTitle.isNull_or_blank()) {
+            val extraTitle = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: title
+            if (hiddenTitle != extraTitle) {
                 return true
             }
         }
@@ -293,15 +305,39 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
     }
 
     private fun findReplyAction(notification: Notification): Pair<PendingIntent?, android.app.RemoteInput?> {
-        val actions = notification.actions ?: return Pair(null, null)
-        for (action in actions) {
-            val remoteInputs = action.remoteInputs ?: continue
-            for (ri in remoteInputs) {
-                if (ri.allowFreeFormInput) {
-                    return Pair(action.actionIntent, ri)
+        // 1. Check standard notification actions
+        val actions = notification.actions
+        if (actions != null) {
+            for (action in actions) {
+                val remoteInputs = action.remoteInputs ?: continue
+                for (ri in remoteInputs) {
+                    if (ri.allowFreeFormInput || !ri.resultKey.isNullOrBlank() || action.title?.toString()?.contains("reply", ignoreCase = true) == true) {
+                        return Pair(action.actionIntent, ri)
+                    }
                 }
             }
         }
+
+        // 2. Check WearableExtender actions (WhatsApp attaches Android Wear reply actions with RemoteInput)
+        try {
+            val wearableExtender = NotificationCompat.WearableExtender(notification)
+            for (action in wearableExtender.actions) {
+                val remoteInputs = action.remoteInputs ?: continue
+                for (ri in remoteInputs) {
+                    if (ri.allowFreeFormInput || !ri.resultKey.isNullOrBlank() || action.title?.toString()?.contains("reply", ignoreCase = true) == true) {
+                        val sysRemoteInput = android.app.RemoteInput.Builder(ri.resultKey)
+                            .setLabel(ri.label)
+                            .setChoices(ri.choices)
+                            .setAllowFreeFormInput(ri.allowFreeFormInput)
+                            .build()
+                        return Pair(action.actionIntent, sysRemoteInput)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Extender parsing error ignore
+        }
+
         return Pair(null, null)
     }
 

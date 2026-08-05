@@ -336,19 +336,22 @@ class ContactsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             val syncRepo = SupabaseSyncRepository(db)
             deviceContacts.forEach { devContact ->
-                val contactId = devContact.name.trim().ifBlank { devContact.phoneNumber ?: "Unknown Contact" }
+                val contactId = devContact.name.trim().ifBlank { devContact.phoneNumber?.trim() ?: "Unknown Contact" }
                 val cleanPhone = devContact.phoneNumber?.trim()
+                val normalizedPhone = cleanPhone?.replace(Regex("[^0-9+]"), "")
 
+                // Preserve existing contact configuration if present
+                val existingContact = db.contactDao().getContactById(contactId)
                 val contact = Contact(
                     contactId = contactId,
-                    phoneNumber = if (cleanPhone.isNullOrBlank()) null else cleanPhone,
+                    phoneNumber = if (!cleanPhone.isNullOrBlank()) cleanPhone else existingContact?.phoneNumber,
                     displayName = contactId,
-                    relationshipLabel = defaultRelationship,
+                    relationshipLabel = existingContact?.relationshipLabel ?: defaultRelationship,
                     isGroup = false,
-                    doNotRespond = false,
-                    gender = null,
-                    allowOtherLanguages = true,
-                    lastMessageAt = System.currentTimeMillis()
+                    doNotRespond = existingContact?.doNotRespond ?: false,
+                    gender = existingContact?.gender,
+                    allowOtherLanguages = existingContact?.allowOtherLanguages ?: true,
+                    lastMessageAt = existingContact?.lastMessageAt ?: System.currentTimeMillis()
                 )
                 db.contactDao().insertOrUpdateContact(contact)
                 syncRepo.syncContact(contact)
@@ -357,18 +360,28 @@ class ContactsViewModel(application: Application) : AndroidViewModel(application
                     val relation = KnownRelation(
                         phoneNumber = cleanPhone,
                         name = contactId,
-                        relationshipLabel = defaultRelationship
+                        relationshipLabel = contact.relationshipLabel
                     )
                     db.knownRelationDao().insertOrUpdateRelation(relation)
                     syncRepo.syncKnownRelation(relation)
+
+                    if (!normalizedPhone.isNullOrBlank() && normalizedPhone != cleanPhone) {
+                        val normRelation = KnownRelation(
+                            phoneNumber = normalizedPhone,
+                            name = contactId,
+                            relationshipLabel = contact.relationshipLabel
+                        )
+                        db.knownRelationDao().insertOrUpdateRelation(normRelation)
+                        syncRepo.syncKnownRelation(normRelation)
+                    }
                 }
 
                 val existingMemory = db.contactMemoryDao().getMemoryForContact(contactId)
                 if (existingMemory == null) {
                     val memory = ContactMemory(
                         contactId = contactId,
-                        summary = "Imported from device contacts.",
-                        importantFacts = "Device contact imported.",
+                        summary = "Imported contact from device/SIM: $contactId.",
+                        importantFacts = "Phone: ${cleanPhone ?: "None"}. Imported into managed contacts memory.",
                         lastUpdated = System.currentTimeMillis()
                     )
                     db.contactMemoryDao().insertOrUpdateMemory(memory)
