@@ -42,7 +42,27 @@ class AutoReplyForegroundService : Service() {
             prefsRepo.updateAutoReplyEnabled(true)
         }
 
+        rebindNotificationListener()
+
         return START_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        startForegroundService()
+        rebindNotificationListener()
+    }
+
+    private fun rebindNotificationListener() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                android.service.notification.NotificationListenerService.requestRebind(
+                    android.content.ComponentName(this, WhatsAppNotificationListenerService::class.java)
+                )
+            } catch (e: Exception) {
+                // Ignore rebind error if system already connected
+            }
+        }
     }
 
     private fun startForegroundService() {

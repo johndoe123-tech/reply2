@@ -73,6 +73,19 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
         }
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.i(TAG, "Task removed from recents. Re-starting foreground service and rebinding listener.")
+        try {
+            AutoReplyForegroundService.startService(this)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                requestRebind(android.content.ComponentName(this, WhatsAppNotificationListenerService::class.java))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in onTaskRemoved: ${e.message}")
+        }
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         super.onNotificationPosted(sbn)
         if (sbn == null) return
@@ -85,14 +98,38 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
         val notification = sbn.notification ?: return
         val extras = notification.extras ?: return
 
-        val rawTitle = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
-        val rawText = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+        val rawTitle = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim()
+            ?: extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()?.trim()
+            ?: extras.getCharSequence("android.hiddenConversationTitle")?.toString()?.trim()
+            ?: ""
 
-        if (rawTitle.isBlank() || rawText.isBlank()) return
+        var rawText = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim()
+        if (rawText.isNullOrBlank()) {
+            rawText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim()
+        }
+        if (rawText.isNullOrBlank()) {
+            val textLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+            if (!textLines.isNullOrEmpty()) {
+                rawText = textLines.lastOrNull()?.toString()?.trim()
+            }
+        }
+        if (rawText.isNullOrBlank()) {
+            val messages = extras.getParcelableArray(Notification.EXTRA_MESSAGES)
+            if (!messages.isNullOrEmpty()) {
+                val lastMsg = messages.lastOrNull()
+                if (lastMsg is Bundle) {
+                    rawText = lastMsg.getCharSequence("text")?.toString()?.trim()
+                }
+            }
+        }
+
+        val extractedText = rawText ?: ""
+
+        if (rawTitle.isBlank() || extractedText.isBlank()) return
 
         // Ignore standard WhatsApp system notifications (e.g. "WhatsApp" - "Checking for new messages")
         val rawTitleTrimmed = rawTitle.trim()
-        val rawTextTrimmed = rawText.trim()
+        val rawTextTrimmed = extractedText.trim()
         if (rawTitleTrimmed.equals("WhatsApp", ignoreCase = true) &&
             (rawTextTrimmed.contains("Checking for new messages", ignoreCase = true) ||
              rawTextTrimmed.contains("WhatsApp Web is currently active", ignoreCase = true) ||
@@ -107,7 +144,7 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
         }
 
         // 1. Group Chat Detection Heuristics
-        if (isGroupChat(rawTitle, rawText, extras, notification.flags)) {
+        if (isGroupChat(rawTitle, extractedText, extras, notification.flags)) {
             Log.d(TAG, "Ignored group chat message from: $rawTitle")
             return
         }
@@ -177,7 +214,7 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
                 val incomingMsg = Message(
                     contactId = contactId,
                     sender = "them",
-                    text = rawText,
+                    text = extractedText,
                     timestamp = System.currentTimeMillis(),
                     wasAutoReplied = false
                 )
@@ -190,7 +227,7 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
                     NotificationHelper.postUserAlertNotification(
                         context = this@WhatsAppNotificationListenerService,
                         contactName = contactId,
-                        incomingText = rawText,
+                        incomingText = extractedText,
                         reason = "This contact is set to manual-reply only."
                     )
                     memoryUpdater.updateMemoryForContact(
@@ -204,7 +241,7 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
                 // 3. Process message through Decision Engine
                 val decision = decisionEngine.processIncomingMessage(
                     contactId = contactId,
-                    incomingText = rawText,
+                    incomingText = extractedText,
                     ollamaUrl = prefs.ollamaUrl,
                     modelName = prefs.selectedModel
                 )
@@ -238,14 +275,14 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
                                 NotificationHelper.postAutoReplyNotification(
                                     context = this@WhatsAppNotificationListenerService,
                                     contactName = contactId,
-                                    incomingText = rawText,
+                                    incomingText = extractedText,
                                     replyText = decision.replyText
                                 )
                             } else {
                                 NotificationHelper.postUserAlertNotification(
                                     context = this@WhatsAppNotificationListenerService,
                                     contactName = contactId,
-                                    incomingText = rawText,
+                                    incomingText = extractedText,
                                     reason = "Failed to send quick reply action."
                                 )
                             }
@@ -253,7 +290,7 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
                             NotificationHelper.postUserAlertNotification(
                                 context = this@WhatsAppNotificationListenerService,
                                 contactName = contactId,
-                                incomingText = rawText,
+                                incomingText = extractedText,
                                 reason = "Reply action missing in WhatsApp notification."
                             )
                         }
@@ -263,7 +300,7 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
                         NotificationHelper.postUserAlertNotification(
                             context = this@WhatsAppNotificationListenerService,
                             contactName = contactId,
-                            incomingText = rawText,
+                            incomingText = extractedText,
                             reason = decision.reason
                         )
                         // Also update contact memory and behavior on NotifyOnly path so history is learned

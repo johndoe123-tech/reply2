@@ -38,6 +38,7 @@
         <service
             android:name=".service.WhatsAppNotificationListenerService"
             android:exported="true"
+            android:stopWithTask="false"
             android:label="WhatsApp AutoReply Listener"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
@@ -49,6 +50,7 @@
         <service
             android:name=".service.AutoReplyForegroundService"
             android:exported="false"
+            android:stopWithTask="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
