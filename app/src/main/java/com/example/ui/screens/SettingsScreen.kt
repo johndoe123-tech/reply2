@@ -91,20 +91,33 @@ fun SettingsScreen(
                         )
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        OutlinedTextField(
-                            value = urlState,
-                            onValueChange = {
-                                urlState = it
-                                viewModel.updateOllamaUrl(it)
-                            },
-                            label = { Text("Ollama Base URL") },
-                            placeholder = { Text("http://192.168.1.5:11434") },
-                            leadingIcon = { Icon(Icons.Default.Dns, contentDescription = null) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("ollama_url_input"),
-                            singleLine = true
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = urlState,
+                                onValueChange = { urlState = it },
+                                label = { Text("Ollama Base URL") },
+                                placeholder = { Text("http://192.168.1.5:11434") },
+                                leadingIcon = { Icon(Icons.Default.Dns, contentDescription = null) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("ollama_url_input"),
+                                singleLine = true
+                            )
+
+                            Button(
+                                onClick = { viewModel.updateOllamaUrl(urlState) },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.testTag("save_ollama_url_button")
+                            ) {
+                                Icon(Icons.Default.Save, contentDescription = "Save")
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Save")
+                            }
+                        }
 
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
@@ -121,7 +134,7 @@ fun SettingsScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Button(
-                                onClick = { viewModel.fetchModels() },
+                                onClick = { viewModel.fetchModels(urlState) },
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("fetch_models_button"),
@@ -141,7 +154,7 @@ fun SettingsScreen(
                             }
 
                             OutlinedButton(
-                                onClick = { viewModel.testConnection() },
+                                onClick = { viewModel.testConnection(urlState) },
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("test_connection_button")

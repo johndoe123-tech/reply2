@@ -165,7 +165,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
     fun updateOllamaUrl(url: String) {
-        viewModelScope.launch { prefsRepo.updateOllamaUrl(url) }
+        viewModelScope.launch {
+            val cleanUrl = url.trim().trimEnd('/')
+            prefsRepo.updateOllamaUrl(cleanUrl)
+            _statusMessage.value = "Ollama URL saved: $cleanUrl"
+        }
     }
 
     fun selectModel(model: String) {
@@ -176,14 +180,16 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { prefsRepo.updateAutoReplyEnabled(enabled) }
     }
 
-    fun fetchModels() {
+    fun fetchModels(customUrl: String? = null) {
         viewModelScope.launch {
             _isLoadingModels.value = true
-            val url = userPreferences.value?.ollamaUrl ?: "http://192.168.1.5:11434"
+            val rawUrl = customUrl ?: userPreferences.value?.ollamaUrl ?: "http://192.168.1.5:11434"
+            val url = rawUrl.trim().trimEnd('/')
+            prefsRepo.updateOllamaUrl(url)
             val result = ollamaRepo.fetchModels(url)
             result.onSuccess { models ->
                 _availableModels.value = models
-                _statusMessage.value = "Fetched ${models.size} models from Ollama."
+                _statusMessage.value = "Saved & fetched ${models.size} models from $url."
                 prefsRepo.updateConnectionStatus("Connected (${models.size} models)")
             }.onFailure { error ->
                 val msg = error.localizedMessage ?: ""
@@ -202,13 +208,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun testConnection() {
+    fun testConnection(customUrl: String? = null) {
         viewModelScope.launch {
-            val url = userPreferences.value?.ollamaUrl ?: "http://192.168.1.5:11434"
+            val rawUrl = customUrl ?: userPreferences.value?.ollamaUrl ?: "http://192.168.1.5:11434"
+            val url = rawUrl.trim().trimEnd('/')
+            prefsRepo.updateOllamaUrl(url)
             val result = ollamaRepo.testConnection(url)
             result.onSuccess { success ->
                 if (success) {
-                    _statusMessage.value = "Connection Successful!"
+                    _statusMessage.value = "Connection Successful! Saved URL: $url"
                     prefsRepo.updateConnectionStatus("Connected")
                 } else {
                     _statusMessage.value = "Server returned no models."

@@ -54,8 +54,9 @@ class UserPreferencesRepository(private val context: Context) {
         }
 
     suspend fun updateOllamaUrl(url: String) {
+        val cleanUrl = url.trim().trimEnd('/')
         context.dataStore.edit { preferences ->
-            preferences[PreferencesKeys.OLLAMA_URL] = url.trimEnd('/')
+            preferences[PreferencesKeys.OLLAMA_URL] = cleanUrl
         }
     }
 
