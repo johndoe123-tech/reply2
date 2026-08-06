@@ -490,6 +490,9 @@ class ContactDetailViewModel(
     ) {
         viewModelScope.launch {
             db.contactDao().updateContactControls(contactId, relationshipLabel, doNotRespond, gender, allowOtherLanguages)
+            db.contactDao().getContactById(contactId)?.let { updatedContact ->
+                SupabaseSyncRepository(db).syncContact(updatedContact)
+            }
 
             val existingMem = contactMemory.value ?: ContactMemory(contactId = contactId)
             val updatedMem = existingMem.copy(

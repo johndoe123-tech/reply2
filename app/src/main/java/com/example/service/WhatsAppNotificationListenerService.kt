@@ -191,16 +191,6 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
             return
         }
 
-        val notifKey = sbn.key
-        if (notifKey != null && respondedKeys.contains(notifKey)) return
-        notifKey?.let {
-            respondedKeys.add(it)
-            if (respondedKeys.size > 100) {
-                val iterator = respondedKeys.iterator()
-                if (iterator.hasNext()) { iterator.next(); iterator.remove() }
-            }
-        }
-
         val notification = sbn.notification ?: return
         val extras = notification.extras ?: return
 
@@ -253,6 +243,21 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
         if (isGroupChat(rawTitle, extractedText, extras, notification.flags)) {
             Log.d(TAG, "Ignored group chat message from: $rawTitle")
             return
+        }
+
+        // Dedup by sbn.key + message text + postTime so we ignore re-posted notifications of the SAME message,
+        // but NEVER drop new incoming messages from the same sender (which share sbn.key).
+        val dedupKey = "${sbn.key}_${rawTitle}_${extractedText}_${sbn.postTime}"
+        if (respondedKeys.contains(dedupKey)) {
+            return
+        }
+        respondedKeys.add(dedupKey)
+        if (respondedKeys.size > 200) {
+            val iterator = respondedKeys.iterator()
+            if (iterator.hasNext()) {
+                iterator.next()
+                iterator.remove()
+            }
         }
 
         // 2. Capture WhatsApp RemoteInput & PendingIntent for quick reply

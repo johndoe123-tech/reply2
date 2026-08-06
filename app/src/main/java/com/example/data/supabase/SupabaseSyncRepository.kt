@@ -254,9 +254,9 @@ class SupabaseSyncRepository(private val db: AppDatabase) {
                     val settingsRows = client.from("app_settings").select().decodeList<AppSettingsRow>()
                     settingsRows.firstOrNull()?.let { s ->
                         val prefs = com.example.data.pref.UserPreferencesRepository.getInstance(context)
-                        prefs.updateOllamaUrl(s.ollamaUrl)
-                        prefs.updateSelectedModel(s.selectedModel)
-                        prefs.updateAutoReplyEnabled(s.autoReplyEnabled)
+                        s.ollamaUrl?.let { prefs.updateOllamaUrl(it) }
+                        s.selectedModel?.let { prefs.updateSelectedModel(it) }
+                        s.autoReplyEnabled?.let { prefs.updateAutoReplyEnabled(it) }
                         Log.i("SupabaseSync", "Restored app settings: Ollama URL=${s.ollamaUrl}")
                     }
                 } catch (e: Exception) {
