@@ -329,11 +329,11 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
             return true
         }
 
-        // 3. Check for WhatsApp group conversation title key
-        val hiddenTitle = extras.getCharSequence("android.hiddenConversationTitle")?.toString()?.trim()
-        if (!hiddenTitle.isNull_or_blank()) {
-            val extraTitle = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: title
-            if (hiddenTitle != extraTitle) {
+        // 3. Check if conversationTitle is explicitly set and differs from title
+        val conversationTitle = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()?.trim()
+        val extraTitle = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: title
+        if (!conversationTitle.isNullOrBlank() && conversationTitle != extraTitle) {
+            if (text.contains(":") && !text.startsWith("http")) {
                 return true
             }
         }

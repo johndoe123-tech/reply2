@@ -604,7 +604,7 @@ private fun executeAuth(
                         // User changed! Clear old local database and pull this user's records from cloud
                         db.clearUserData()
                         prefs.updateLastUserId(currentUserId)
-                        com.example.data.supabase.SupabaseSyncRepository(db).restoreAllDataFromCloud()
+                        com.example.data.supabase.SupabaseSyncRepository(db).restoreAllDataFromCloud(context)
                     }
                 }
                 onSuccess()

@@ -74,9 +74,26 @@ class SupabaseSyncRepository(private val db: AppDatabase) {
         }
     }
 
+    fun syncAppSettings(ollamaUrl: String, selectedModel: String, autoReplyEnabled: Boolean) {
+        scope.launch {
+            try {
+                client.from("app_settings").upsert(
+                    AppSettingsRow(
+                        id = 1,
+                        ollamaUrl = ollamaUrl,
+                        selectedModel = selectedModel,
+                        autoReplyEnabled = autoReplyEnabled
+                    )
+                )
+            } catch (e: Exception) {
+                Log.e("SupabaseSync", "Error syncing app settings: ${e.message}")
+            }
+        }
+    }
+
     // --- Restore Data on Login / Launch ---
 
-    suspend fun restoreAllDataFromCloud() {
+    suspend fun restoreAllDataFromCloud(context: android.content.Context? = null) {
         try {
             // 1. Personal Memory
             val pmRows = client.from("personal_memory").select().decodeList<PersonalMemoryRow>()
@@ -112,6 +129,22 @@ class SupabaseSyncRepository(private val db: AppDatabase) {
             val messageRows = client.from("messages").select().decodeList<MessageRow>()
             for (row in messageRows) {
                 db.messageDao().insertMessage(row.toEntity())
+            }
+
+            // 7. App Settings
+            if (context != null) {
+                try {
+                    val settingsRows = client.from("app_settings").select().decodeList<AppSettingsRow>()
+                    settingsRows.firstOrNull()?.let { s ->
+                        val prefs = com.example.data.pref.UserPreferencesRepository.getInstance(context)
+                        prefs.updateOllamaUrl(s.ollamaUrl)
+                        prefs.updateSelectedModel(s.selectedModel)
+                        prefs.updateAutoReplyEnabled(s.autoReplyEnabled)
+                        Log.i("SupabaseSync", "Restored app settings: Ollama URL=${s.ollamaUrl}")
+                    }
+                } catch (e: Exception) {
+                    Log.e("SupabaseSync", "Failed to restore app settings or table missing: ${e.message}")
+                }
             }
 
             Log.i("SupabaseSync", "Cloud restore completed successfully!")

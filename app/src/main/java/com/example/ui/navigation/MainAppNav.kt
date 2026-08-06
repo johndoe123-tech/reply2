@@ -121,7 +121,7 @@ fun MainAppNav() {
                         isAuthenticated.value = true
                         scope.launch {
                             val db = AppDatabase.getDatabase(context)
-                            SupabaseSyncRepository(db).restoreAllDataFromCloud()
+                            SupabaseSyncRepository(db).restoreAllDataFromCloud(context)
                         }
                         navController.navigate(mainStartDestination) {
                             popUpTo(Screen.Login.route) { inclusive = true }

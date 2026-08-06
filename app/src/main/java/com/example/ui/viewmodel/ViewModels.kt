@@ -169,15 +169,37 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             val cleanUrl = url.trim().trimEnd('/')
             prefsRepo.updateOllamaUrl(cleanUrl)
             _statusMessage.value = "Ollama URL saved: $cleanUrl"
+            val currentPrefs = userPreferences.value
+            SupabaseSyncRepository(db).syncAppSettings(
+                ollamaUrl = cleanUrl,
+                selectedModel = currentPrefs?.selectedModel ?: "llama3",
+                autoReplyEnabled = currentPrefs?.autoReplyEnabled ?: true
+            )
         }
     }
 
     fun selectModel(model: String) {
-        viewModelScope.launch { prefsRepo.updateSelectedModel(model) }
+        viewModelScope.launch {
+            prefsRepo.updateSelectedModel(model)
+            val currentPrefs = userPreferences.value
+            SupabaseSyncRepository(db).syncAppSettings(
+                ollamaUrl = currentPrefs?.ollamaUrl ?: "http://192.168.1.5:11434",
+                selectedModel = model,
+                autoReplyEnabled = currentPrefs?.autoReplyEnabled ?: true
+            )
+        }
     }
 
     fun updateAutoReplyEnabled(enabled: Boolean) {
-        viewModelScope.launch { prefsRepo.updateAutoReplyEnabled(enabled) }
+        viewModelScope.launch {
+            prefsRepo.updateAutoReplyEnabled(enabled)
+            val currentPrefs = userPreferences.value
+            SupabaseSyncRepository(db).syncAppSettings(
+                ollamaUrl = currentPrefs?.ollamaUrl ?: "http://192.168.1.5:11434",
+                selectedModel = currentPrefs?.selectedModel ?: "llama3",
+                autoReplyEnabled = enabled
+            )
+        }
     }
 
     fun fetchModels(customUrl: String? = null) {

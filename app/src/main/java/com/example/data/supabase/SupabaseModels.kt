@@ -5,6 +5,14 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class AppSettingsRow(
+    val id: Int = 1,
+    @SerialName("ollama_url") val ollamaUrl: String = "http://192.168.1.5:11434",
+    @SerialName("selected_model") val selectedModel: String = "llama3",
+    @SerialName("auto_reply_enabled") val autoReplyEnabled: Boolean = true
+)
+
+@Serializable
 data class PersonalMemoryRow(
     val id: Int = 1,
     @SerialName("about_me") val aboutMe: String = "",
