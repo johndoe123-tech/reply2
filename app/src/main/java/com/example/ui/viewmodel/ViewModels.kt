@@ -35,6 +35,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val recentActivity: StateFlow<List<Message>> = db.messageDao().getRecentActivityFeed(20)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val activityLogs: StateFlow<List<ActivityLogEntry>> = db.activityLogDao().getRecentLogsFlow(50)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     private val _isNotificationAccessGranted = MutableStateFlow(false)
     val isNotificationAccessGranted: StateFlow<Boolean> = _isNotificationAccessGranted.asStateFlow()
 
@@ -43,6 +46,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         checkNotificationAccess()
+        com.example.service.ListenerHealthWorker.schedule(application)
+    }
+
+    fun clearActivityLogs() {
+        viewModelScope.launch {
+            db.activityLogDao().clearLogs()
+        }
     }
 
     fun checkNotificationAccess() {

@@ -13,6 +13,7 @@ object NotificationHelper {
 
     const val CHANNEL_ALERT_ID = "autoreply_alerts_channel"
     const val CHANNEL_ACTIVITY_ID = "autoreply_activity_channel"
+    const val CHANNEL_DIAGNOSTICS_ID = "autoreply_diagnostics_channel"
 
     fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -34,7 +35,41 @@ object NotificationHelper {
                 description = activityDesc
             }
             notificationManager.createNotificationChannel(activityChannel)
+
+            // Channel 3: Diagnostic Error Notifications
+            val diagName = "AutoReply Diagnostics & Errors"
+            val diagDesc = "Low-priority notifications for background errors or connectivity issues"
+            val diagChannel = NotificationChannel(CHANNEL_DIAGNOSTICS_ID, diagName, NotificationManager.IMPORTANCE_LOW).apply {
+                description = diagDesc
+            }
+            notificationManager.createNotificationChannel(diagChannel)
         }
+    }
+
+    fun postDiagnosticErrorNotification(context: Context, detail: String) {
+        createChannels(context)
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationId = (System.currentTimeMillis() % 100000).toInt() + 90000
+
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_DIAGNOSTICS_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle("AutoReply System Alert")
+            .setContentText(detail)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setAutoCancel(true)
+            .build()
+
+        notificationManager.notify(notificationId, notification)
     }
 
     fun postAutoReplyNotification(context: Context, contactName: String, incomingText: String, replyText: String) {

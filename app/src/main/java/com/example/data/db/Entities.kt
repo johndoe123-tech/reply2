@@ -62,3 +62,13 @@ data class KnownRelation(
     val name: String,
     val relationshipLabel: String
 )
+
+@Entity(tableName = "activity_logs")
+data class ActivityLogEntry(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val timestamp: Long = System.currentTimeMillis(),
+    val contactId: String? = null,
+    val eventType: String, // "MESSAGE_RECEIVED" | "AUTO_REPLIED" | "NOTIFIED_USER" | "ERROR" | "LISTENER_CONNECTED" | "LISTENER_DISCONNECTED" | "HEALTH_CHECK"
+    val detail: String
+)
+

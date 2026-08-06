@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.example.data.db.ActivityLogEntry
 import com.example.data.db.Message
 import com.example.ui.theme.StatusAmber
 import com.example.ui.theme.StatusGreen
@@ -45,8 +46,20 @@ fun HomeScreen(
     val context = LocalContext.current
     val prefs by viewModel.userPreferences.collectAsState()
     val activityFeed by viewModel.recentActivity.collectAsState()
+    val systemLogs by viewModel.activityLogs.collectAsState()
     val isPermissionGranted by viewModel.isNotificationAccessGranted.collectAsState()
     val simulationResult by viewModel.simulatingState.collectAsState()
+
+    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Diagnostic Activity Logs, 1 = Messages Feed
+    var logFilter by remember { mutableStateOf("ALL") } // ALL, ERRORS, AUTO_REPLIED
+
+    val filteredLogs = remember(systemLogs, logFilter) {
+        when (logFilter) {
+            "ERRORS" -> systemLogs.filter { it.eventType == "ERROR" }
+            "AUTO_REPLIED" -> systemLogs.filter { it.eventType == "AUTO_REPLIED" }
+            else -> systemLogs
+        }
+    }
 
     val postNotificationLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -370,59 +383,152 @@ fun HomeScreen(
                 }
             }
 
-            // 5. Recent Activity Feed Header
+            // 5. Activity Log & Diagnostic Feed Header & Tabs
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Recent Activity Log",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "${activityFeed.size} events",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            // Activity Log items
-            if (activityFeed.isEmpty()) {
-                item {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(32.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(
-                                    imageVector = Icons.Default.Inbox,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(36.dp)
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
+                Column {
+                    TabRow(selectedTabIndex = selectedTab) {
+                        Tab(
+                            selected = selectedTab == 0,
+                            onClick = { selectedTab = 0 },
+                            text = {
                                 Text(
-                                    text = "No recent auto-reply activity recorded yet.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    "System Diagnostics (${systemLogs.size})",
+                                    fontWeight = FontWeight.Bold
                                 )
+                            },
+                            icon = { Icon(Icons.Default.BugReport, contentDescription = null) },
+                            modifier = Modifier.testTag("tab_diagnostics")
+                        )
+                        Tab(
+                            selected = selectedTab == 1,
+                            onClick = { selectedTab = 1 },
+                            text = {
+                                Text(
+                                    "Messages Feed (${activityFeed.size})",
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            icon = { Icon(Icons.Default.Chat, contentDescription = null) },
+                            modifier = Modifier.testTag("tab_messages")
+                        )
+                    }
+
+                    if (selectedTab == 0) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(
+                                    selected = logFilter == "ALL",
+                                    onClick = { logFilter = "ALL" },
+                                    label = { Text("All (${systemLogs.size})") },
+                                    modifier = Modifier.testTag("filter_all")
+                                )
+                                FilterChip(
+                                    selected = logFilter == "ERRORS",
+                                    onClick = { logFilter = "ERRORS" },
+                                    label = { Text("Errors (${systemLogs.count { it.eventType == "ERROR" }})") },
+                                    leadingIcon = if (logFilter == "ERRORS") {
+                                        { Icon(Icons.Default.Error, contentDescription = null, tint = StatusRed) }
+                                    } else null,
+                                    modifier = Modifier.testTag("filter_errors")
+                                )
+                                FilterChip(
+                                    selected = logFilter == "AUTO_REPLIED",
+                                    onClick = { logFilter = "AUTO_REPLIED" },
+                                    label = { Text("Replies (${systemLogs.count { it.eventType == "AUTO_REPLIED" }})") },
+                                    modifier = Modifier.testTag("filter_replies")
+                                )
+                            }
+
+                            if (systemLogs.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { viewModel.clearActivityLogs() },
+                                    modifier = Modifier.testTag("clear_logs_button")
+                                ) {
+                                    Icon(Icons.Default.DeleteOutline, contentDescription = "Clear Logs", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
                         }
                     }
                 }
+            }
+
+            if (selectedTab == 0) {
+                // Render System Diagnostic Logs
+                if (filteredLogs.isEmpty()) {
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircleOutline,
+                                        contentDescription = null,
+                                        tint = StatusGreen,
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = if (logFilter == "ERRORS") "No errors logged! Everything is operating normally."
+                                        else "No system activity logs recorded yet.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    items(filteredLogs) { logEntry ->
+                        ActivityLogEntryItem(entry = logEntry)
+                    }
+                }
             } else {
-                items(activityFeed) { msg ->
-                    ActivityFeedItem(msg = msg)
+                // Render Messages Activity Log items
+                if (activityFeed.isEmpty()) {
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        imageVector = Icons.Default.Inbox,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = "No recent auto-reply activity recorded yet.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    items(activityFeed) { msg ->
+                        ActivityFeedItem(msg = msg)
+                    }
                 }
             }
 
@@ -496,6 +602,91 @@ fun ActivityFeedItem(msg: Message) {
                         modifier = Modifier.height(24.dp)
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun ActivityLogEntryItem(entry: ActivityLogEntry) {
+    val dateFormat = remember { SimpleDateFormat("HH:mm:ss, MMM d", Locale.getDefault()) }
+    val formattedTime = remember(entry.timestamp) { dateFormat.format(Date(entry.timestamp)) }
+
+    val (badgeColor, badgeText, icon) = when (entry.eventType) {
+        "ERROR" -> Triple(StatusRed, "ERROR", Icons.Default.ErrorOutline)
+        "AUTO_REPLIED" -> Triple(StatusGreen, "AUTO-REPLIED", Icons.Default.CheckCircle)
+        "NOTIFIED_USER" -> Triple(StatusAmber, "ALERT", Icons.Default.NotificationsActive)
+        "MESSAGE_RECEIVED" -> Triple(MaterialTheme.colorScheme.tertiary, "RECEIVED", Icons.Default.Inbox)
+        "LISTENER_CONNECTED" -> Triple(MaterialTheme.colorScheme.primary, "CONNECTED", Icons.Default.Power)
+        "LISTENER_DISCONNECTED" -> Triple(StatusRed, "DISCONNECTED", Icons.Default.PowerOff)
+        "HEALTH_CHECK" -> Triple(MaterialTheme.colorScheme.secondary, "HEALTH", Icons.Default.HealthAndSafety)
+        else -> Triple(MaterialTheme.colorScheme.outline, entry.eventType, Icons.Default.Info)
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = if (entry.eventType == "ERROR") MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+            else MaterialTheme.colorScheme.surface
+        ),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("activity_log_item_${entry.id}")
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = badgeColor,
+                modifier = Modifier
+                    .size(20.dp)
+                    .padding(top = 2.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            color = badgeColor.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = badgeText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = badgeColor,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                        if (!entry.contactId.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = entry.contactId,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                    Text(
+                        text = formattedTime,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = entry.detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (entry.eventType == "ERROR") MaterialTheme.colorScheme.onErrorContainer
+                    else MaterialTheme.colorScheme.onSurface
+                )
             }
         }
     }

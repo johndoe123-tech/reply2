@@ -107,3 +107,19 @@ interface KnownRelationDao {
     @Query("DELETE FROM known_relations WHERE phoneNumber = :phoneNumber")
     suspend fun deleteRelation(phoneNumber: String)
 }
+
+@Dao
+interface ActivityLogDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(entry: ActivityLogEntry)
+
+    @Query("SELECT * FROM activity_logs ORDER BY timestamp DESC LIMIT :limit")
+    fun getRecentLogsFlow(limit: Int = 50): Flow<List<ActivityLogEntry>>
+
+    @Query("SELECT * FROM activity_logs ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentLogs(limit: Int = 50): List<ActivityLogEntry>
+
+    @Query("DELETE FROM activity_logs")
+    suspend fun clearLogs()
+}
+

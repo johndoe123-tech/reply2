@@ -11,8 +11,11 @@ import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
+import com.example.data.db.ActivityLogEntry
 import com.example.data.db.AppDatabase
 import com.example.data.db.Contact
 import com.example.data.db.KnownRelation
@@ -56,6 +59,15 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
         Log.i(TAG, "Notification listener connected to WhatsApp system stream.")
         try {
             AutoReplyForegroundService.startService(this)
+            serviceScope.launch {
+                db.activityLogDao().insert(
+                    ActivityLogEntry(
+                        timestamp = System.currentTimeMillis(),
+                        eventType = "LISTENER_CONNECTED",
+                        detail = "Connected to WhatsApp notification stream."
+                    )
+                )
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error starting foreground service from listener: ${e.message}")
         }
@@ -64,6 +76,19 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
         Log.w(TAG, "Notification listener disconnected. Requesting rebind...")
+        try {
+            serviceScope.launch {
+                db.activityLogDao().insert(
+                    ActivityLogEntry(
+                        timestamp = System.currentTimeMillis(),
+                        eventType = "LISTENER_DISCONNECTED",
+                        detail = "Disconnected from WhatsApp notification stream."
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error logging listener disconnect: ${e.message}")
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             try {
                 requestRebind(android.content.ComponentName(this, WhatsAppNotificationListenerService::class.java))
@@ -178,6 +203,16 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
 
                 val contactId = resolvedName
 
+                // Log received message in Activity Logs
+                db.activityLogDao().insert(
+                    ActivityLogEntry(
+                        timestamp = System.currentTimeMillis(),
+                        contactId = contactId,
+                        eventType = "MESSAGE_RECEIVED",
+                        detail = "Received message: \"$extractedText\""
+                    )
+                )
+
                 // Store reply action in cache if available, or retrieve cached action for background reply
                 var activePendingIntent = pendingIntent
                 var activeRemoteInput = remoteInput
@@ -238,6 +273,31 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
                     return@launch
                 }
 
+                // Check WiFi connectivity if Ollama URL is local/LAN
+                if (isLocalUrl(prefs.ollamaUrl)) {
+                    val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                    val activeNetwork = cm?.activeNetwork
+                    val capabilities = activeNetwork?.let { cm.getNetworkCapabilities(it) }
+                    val hasWifi = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+
+                    if (!hasWifi) {
+                        val wifiErrorMsg = "No WiFi connection — cannot reach Ollama server (${prefs.ollamaUrl}) on local network."
+                        db.activityLogDao().insert(
+                            ActivityLogEntry(
+                                timestamp = System.currentTimeMillis(),
+                                contactId = contactId,
+                                eventType = "ERROR",
+                                detail = wifiErrorMsg
+                            )
+                        )
+                        NotificationHelper.postDiagnosticErrorNotification(
+                            context = this@WhatsAppNotificationListenerService,
+                            detail = "Message from $contactId couldn't be processed — phone lost WiFi connection to your Ollama server."
+                        )
+                        return@launch
+                    }
+                }
+
                 // 3. Process message through Decision Engine
                 val decision = decisionEngine.processIncomingMessage(
                     contactId = contactId,
@@ -264,6 +324,16 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
                                 val replyId = db.messageDao().insertMessage(replyMsg)
                                 SupabaseSyncRepository(db).syncMessage(replyMsg.copy(id = replyId))
 
+                                // Log Auto-Reply in Activity Log
+                                db.activityLogDao().insert(
+                                    ActivityLogEntry(
+                                        timestamp = System.currentTimeMillis(),
+                                        contactId = contactId,
+                                        eventType = "AUTO_REPLIED",
+                                        detail = "Auto-replied: \"${decision.replyText}\""
+                                    )
+                                )
+
                                 // Async memory update
                                 memoryUpdater.updateMemoryForContact(
                                     contactId = contactId,
@@ -279,24 +349,50 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
                                     replyText = decision.replyText
                                 )
                             } else {
+                                val sendFailDetail = "Failed to execute RemoteInput reply action."
+                                db.activityLogDao().insert(
+                                    ActivityLogEntry(
+                                        timestamp = System.currentTimeMillis(),
+                                        contactId = contactId,
+                                        eventType = "ERROR",
+                                        detail = sendFailDetail
+                                    )
+                                )
                                 NotificationHelper.postUserAlertNotification(
                                     context = this@WhatsAppNotificationListenerService,
                                     contactName = contactId,
                                     incomingText = extractedText,
-                                    reason = "Failed to send quick reply action."
+                                    reason = sendFailDetail
                                 )
                             }
                         } else {
+                            val missingActionDetail = "Reply action missing in WhatsApp notification for $contactId."
+                            db.activityLogDao().insert(
+                                ActivityLogEntry(
+                                    timestamp = System.currentTimeMillis(),
+                                    contactId = contactId,
+                                    eventType = "ERROR",
+                                    detail = missingActionDetail
+                                )
+                            )
                             NotificationHelper.postUserAlertNotification(
                                 context = this@WhatsAppNotificationListenerService,
                                 contactName = contactId,
                                 incomingText = extractedText,
-                                reason = "Reply action missing in WhatsApp notification."
+                                reason = missingActionDetail
                             )
                         }
                     }
                     is DecisionResult.NotifyOnly -> {
                         Log.i(TAG, "NotifyOnly / Tool Call triggered for $contactId: ${decision.reason}")
+                        db.activityLogDao().insert(
+                            ActivityLogEntry(
+                                timestamp = System.currentTimeMillis(),
+                                contactId = contactId,
+                                eventType = "NOTIFIED_USER",
+                                detail = "Escalated: ${decision.reason}"
+                            )
+                        )
                         NotificationHelper.postUserAlertNotification(
                             context = this@WhatsAppNotificationListenerService,
                             contactName = contactId,
@@ -312,9 +408,41 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
                     }
                 }
             } catch (e: Exception) {
+                val stackSummary = e.stackTrace.take(3).joinToString("; ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+                val errorDetail = "${e.javaClass.simpleName}: ${e.message ?: "Unknown error"} ($stackSummary)"
+                try {
+                    db.activityLogDao().insert(
+                        ActivityLogEntry(
+                            timestamp = System.currentTimeMillis(),
+                            contactId = null,
+                            eventType = "ERROR",
+                            detail = errorDetail
+                        )
+                    )
+                    NotificationHelper.postDiagnosticErrorNotification(
+                        context = this@WhatsAppNotificationListenerService,
+                        detail = "Background AutoReply Error: ${e.message ?: "Unknown error"}"
+                    )
+                } catch (logErr: Exception) {
+                    Log.e(TAG, "Failed to insert error log: ${logErr.message}")
+                }
                 Log.e(TAG, "Error processing WhatsApp notification", e)
             }
         }
+    }
+
+    private fun isLocalUrl(url: String): Boolean {
+        val clean = url.lowercase().removePrefix("http://").removePrefix("https://").substringBefore(":")
+        return clean == "localhost" || clean == "127.0.0.1" ||
+               clean.startsWith("192.168.") || clean.startsWith("10.") ||
+               clean.startsWith("172.16.") || clean.startsWith("172.17.") ||
+               clean.startsWith("172.18.") || clean.startsWith("172.19.") ||
+               clean.startsWith("172.20.") || clean.startsWith("172.21.") ||
+               clean.startsWith("172.22.") || clean.startsWith("172.23.") ||
+               clean.startsWith("172.24.") || clean.startsWith("172.25.") ||
+               clean.startsWith("172.26.") || clean.startsWith("172.27.") ||
+               clean.startsWith("172.28.") || clean.startsWith("172.29.") ||
+               clean.startsWith("172.30.") || clean.startsWith("172.31.")
     }
 
     private fun isGroupChat(title: String, text: String, extras: Bundle, flags: Int): Boolean {

@@ -14,9 +14,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BehaviorProfile::class,
         Message::class,
         PersonalMemory::class,
-        KnownRelation::class
+        KnownRelation::class,
+        ActivityLogEntry::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,6 +27,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     abstract fun personalMemoryDao(): PersonalMemoryDao
     abstract fun knownRelationDao(): KnownRelationDao
+    abstract fun activityLogDao(): ActivityLogDao
 
     suspend fun clearUserData() {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {

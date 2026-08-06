@@ -84,6 +84,7 @@ dependencies {
   implementation("io.ktor:ktor-client-core:3.0.1")
   implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
+  implementation("androidx.work:work-runtime-ktx:2.9.1")
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)
