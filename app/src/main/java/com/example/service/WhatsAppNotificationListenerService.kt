@@ -277,10 +277,20 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
 
                 // Resolve Contact Identity
                 val resolvedName = contactResolver.resolveContactName(rawTitle)
+                val contactId = deriveStableConversationKey(sbn, rawTitle)
                 val knownRelation: KnownRelation? = db.knownRelationDao().getByPhoneNumber(rawTitle)
                 val relationshipLabel = knownRelation?.relationshipLabel ?: "Friend"
 
-                val contactId = resolvedName
+                if (contactId.startsWith("name_")) {
+                    db.activityLogDao().insert(
+                        ActivityLogEntry(
+                            timestamp = System.currentTimeMillis(),
+                            contactId = contactId,
+                            eventType = "IDENTITY_WARNING",
+                            detail = "Identity for '$resolvedName' relies on display name only and could collide with another contact sharing the same name."
+                        )
+                    )
+                }
 
                 // Log received message in Activity Logs
                 db.activityLogDao().insert(
@@ -583,6 +593,50 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
         }
 
         return Pair(null, null)
+    }
+
+    private fun deriveStableConversationKey(sbn: StatusBarNotification, rawTitle: String): String {
+        // 1. Prefer the notification's shortcutId — Android's Conversation/People API
+        val shortcutId = sbn.notification?.shortcutId
+        if (!shortcutId.isNullOrBlank()) {
+            return "sc_$shortcutId"
+        }
+
+        // 2. Fall back to the phone number URI from EXTRA_PEOPLE_LIST / EXTRA_PEOPLE, if present
+        val extras = sbn.notification?.extras
+        if (extras != null) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    val people = extras.getParcelableArrayList<android.app.Person>(Notification.EXTRA_PEOPLE_LIST)
+                    val phoneUri = people?.firstOrNull { it.uri?.startsWith("tel:") == true }?.uri
+                    if (!phoneUri.isNullOrBlank()) {
+                        val cleanNum = phoneUri.removePrefix("tel:").filter { it.isDigit() || it == '+' }
+                        if (cleanNum.isNotBlank()) {
+                            return "tel_$cleanNum"
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not extract Person URI from notification: ${e.message}")
+            }
+
+            try {
+                @Suppress("DEPRECATION")
+                val stringPeople = extras.getStringArrayList(Notification.EXTRA_PEOPLE)
+                val phoneUri = stringPeople?.firstOrNull { it.startsWith("tel:") }
+                if (!phoneUri.isNullOrBlank()) {
+                    val cleanNum = phoneUri.removePrefix("tel:").filter { it.isDigit() || it == '+' }
+                    if (cleanNum.isNotBlank()) {
+                        return "tel_$cleanNum"
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not extract URI from EXTRA_PEOPLE: ${e.message}")
+            }
+        }
+
+        // 3. Last resort: display-name-based key (current behavior).
+        return "name_${rawTitle.trim().lowercase()}"
     }
 
     private fun sendWhatsAppReply(
