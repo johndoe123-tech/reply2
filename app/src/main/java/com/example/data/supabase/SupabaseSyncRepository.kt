@@ -7,10 +7,125 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
+data class SyncResult(val successCount: Int, val failedCount: Int)
+
 class SupabaseSyncRepository(private val db: AppDatabase) {
 
     private val client get() = SupabaseClientProvider.client
     private val scope = CoroutineScope(Dispatchers.IO)
+
+    private fun logSyncError(table: String, contactId: String?, error: Exception) {
+        val detail = "Cloud sync failed [$table]: ${error.javaClass.simpleName}: ${error.message}"
+        Log.e("SupabaseSync", detail, error)
+        scope.launch {
+            try {
+                db.activityLogDao().insert(
+                    ActivityLogEntry(
+                        timestamp = System.currentTimeMillis(),
+                        contactId = contactId,
+                        eventType = "CLOUD_SYNC_ERROR",
+                        detail = detail
+                    )
+                )
+            } catch (_: Exception) { /* avoid crash-looping on logging itself */ }
+        }
+    }
+
+    // --- Suspend sync methods for one-shot / force sync ---
+
+    suspend fun syncContactSuspend(contact: Contact) {
+        try {
+            client.from("contacts").upsert(contact.toRow())
+        } catch (e: Exception) {
+            logSyncError("contacts", contact.contactId, e)
+            throw e
+        }
+    }
+
+    suspend fun syncContactMemorySuspend(memory: ContactMemory) {
+        try {
+            client.from("contact_memories").upsert(memory.toRow())
+        } catch (e: Exception) {
+            logSyncError("contact_memories", memory.contactId, e)
+            throw e
+        }
+    }
+
+    suspend fun syncBehaviorProfileSuspend(profile: BehaviorProfile) {
+        try {
+            client.from("behavior_profiles").upsert(profile.toRow())
+        } catch (e: Exception) {
+            logSyncError("behavior_profiles", profile.contactId, e)
+            throw e
+        }
+    }
+
+    suspend fun syncKnownRelationSuspend(relation: KnownRelation) {
+        try {
+            client.from("known_relations").upsert(relation.toRow())
+        } catch (e: Exception) {
+            logSyncError("known_relations", null, e)
+            throw e
+        }
+    }
+
+    suspend fun syncMessageSuspend(message: Message) {
+        try {
+            client.from("messages").upsert(message.toRow()) {
+                onConflict = "user_id,contact_id,local_id"
+            }
+        } catch (e: Exception) {
+            logSyncError("messages", message.contactId, e)
+            throw e
+        }
+    }
+
+    suspend fun syncPersonalMemorySuspend(memory: PersonalMemory) {
+        try {
+            client.from("personal_memory").upsert(memory.toRow())
+        } catch (e: Exception) {
+            logSyncError("personal_memory", null, e)
+            throw e
+        }
+    }
+
+    suspend fun forceFullSync(): SyncResult {
+        var success = 0
+        var failed = 0
+
+        db.contactDao().getAllContactsOnce().forEach {
+            runCatching { syncContactSuspend(it) }
+                .onSuccess { success++ }
+                .onFailure { failed++ }
+        }
+        db.contactMemoryDao().getAllOnce().forEach {
+            runCatching { syncContactMemorySuspend(it) }
+                .onSuccess { success++ }
+                .onFailure { failed++ }
+        }
+        db.behaviorProfileDao().getAllOnce().forEach {
+            runCatching { syncBehaviorProfileSuspend(it) }
+                .onSuccess { success++ }
+                .onFailure { failed++ }
+        }
+        db.knownRelationDao().getAllOnce().forEach {
+            runCatching { syncKnownRelationSuspend(it) }
+                .onSuccess { success++ }
+                .onFailure { failed++ }
+        }
+        db.messageDao().getAllOnce().forEach {
+            runCatching { syncMessageSuspend(it) }
+                .onSuccess { success++ }
+                .onFailure { failed++ }
+        }
+        db.personalMemoryDao().getPersonalMemory()?.let { pm ->
+            runCatching { syncPersonalMemorySuspend(pm) }
+                .onSuccess { success++ }
+                .onFailure { failed++ }
+        }
+
+        return SyncResult(success, failed)
+    }
 
     // --- Fire-and-forget background sync calls ---
 
@@ -19,7 +134,7 @@ class SupabaseSyncRepository(private val db: AppDatabase) {
             try {
                 client.from("personal_memory").upsert(memory.toRow())
             } catch (e: Exception) {
-                Log.e("SupabaseSync", "Error syncing personal memory: ${e.message}")
+                logSyncError("personal_memory", null, e)
             }
         }
     }
@@ -29,7 +144,7 @@ class SupabaseSyncRepository(private val db: AppDatabase) {
             try {
                 client.from("contacts").upsert(contact.toRow())
             } catch (e: Exception) {
-                Log.e("SupabaseSync", "Error syncing contact: ${e.message}")
+                logSyncError("contacts", contact.contactId, e)
             }
         }
     }
@@ -39,7 +154,7 @@ class SupabaseSyncRepository(private val db: AppDatabase) {
             try {
                 client.from("contact_memories").upsert(memory.toRow())
             } catch (e: Exception) {
-                Log.e("SupabaseSync", "Error syncing contact memory: ${e.message}")
+                logSyncError("contact_memories", memory.contactId, e)
             }
         }
     }
@@ -49,7 +164,7 @@ class SupabaseSyncRepository(private val db: AppDatabase) {
             try {
                 client.from("behavior_profiles").upsert(profile.toRow())
             } catch (e: Exception) {
-                Log.e("SupabaseSync", "Error syncing behavior profile: ${e.message}")
+                logSyncError("behavior_profiles", profile.contactId, e)
             }
         }
     }
@@ -59,7 +174,7 @@ class SupabaseSyncRepository(private val db: AppDatabase) {
             try {
                 client.from("known_relations").upsert(relation.toRow())
             } catch (e: Exception) {
-                Log.e("SupabaseSync", "Error syncing known relation: ${e.message}")
+                logSyncError("known_relations", null, e)
             }
         }
     }
@@ -67,9 +182,11 @@ class SupabaseSyncRepository(private val db: AppDatabase) {
     fun syncMessage(message: Message) {
         scope.launch {
             try {
-                client.from("messages").upsert(message.toRow())
+                client.from("messages").upsert(message.toRow()) {
+                    onConflict = "user_id,contact_id,local_id"
+                }
             } catch (e: Exception) {
-                Log.e("SupabaseSync", "Error syncing message: ${e.message}")
+                logSyncError("messages", message.contactId, e)
             }
         }
     }
@@ -86,7 +203,7 @@ class SupabaseSyncRepository(private val db: AppDatabase) {
                     )
                 )
             } catch (e: Exception) {
-                Log.e("SupabaseSync", "Error syncing app settings: ${e.message}")
+                logSyncError("app_settings", null, e)
             }
         }
     }
@@ -143,13 +260,13 @@ class SupabaseSyncRepository(private val db: AppDatabase) {
                         Log.i("SupabaseSync", "Restored app settings: Ollama URL=${s.ollamaUrl}")
                     }
                 } catch (e: Exception) {
-                    Log.e("SupabaseSync", "Failed to restore app settings or table missing: ${e.message}")
+                    logSyncError("app_settings_restore", null, e)
                 }
             }
 
             Log.i("SupabaseSync", "Cloud restore completed successfully!")
         } catch (e: Exception) {
-            Log.e("SupabaseSync", "Failed to restore data from Supabase: ${e.message}")
+            logSyncError("all_tables_restore", null, e)
         }
     }
 }

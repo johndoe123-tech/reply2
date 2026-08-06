@@ -14,7 +14,6 @@ import com.example.data.ollama.OllamaRepository
 import com.example.data.pref.UserPreferencesRepository
 import com.example.domain.DecisionEngine
 import com.example.domain.DecisionResult
-import com.example.service.AutoReplyForegroundService
 import com.example.service.NotificationHelper
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -63,11 +62,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleAutoReply(enable: Boolean) {
-        val context = getApplication<Application>()
-        if (enable) {
-            AutoReplyForegroundService.startService(context)
-        } else {
-            AutoReplyForegroundService.stopService(context)
+        viewModelScope.launch {
+            prefsRepo.updateAutoReplyEnabled(enable)
         }
     }
 
@@ -209,6 +205,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 selectedModel = currentPrefs?.selectedModel ?: "llama3",
                 autoReplyEnabled = enabled
             )
+        }
+    }
+
+    fun forceFullSync() {
+        viewModelScope.launch {
+            _statusMessage.value = "Starting full cloud sync..."
+            val syncRepo = SupabaseSyncRepository(db)
+            val result = syncRepo.forceFullSync()
+            _statusMessage.value = "Synced ${result.successCount} items, ${result.failedCount} failed — check Activity Log for details."
         }
     }
 

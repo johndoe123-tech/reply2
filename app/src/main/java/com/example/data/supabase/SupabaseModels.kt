@@ -151,7 +151,8 @@ fun KnownRelationRow.toEntity() = KnownRelation(
 
 @Serializable
 data class MessageRow(
-    val id: Long = 0,
+    val id: Long? = null,
+    @SerialName("local_id") val localId: Long? = null,
     @SerialName("contact_id") val contactId: String,
     val sender: String,
     val text: String,
@@ -160,7 +161,8 @@ data class MessageRow(
 )
 
 fun Message.toRow() = MessageRow(
-    id = id,
+    id = null,
+    localId = id,
     contactId = contactId,
     sender = sender,
     text = text,
@@ -169,7 +171,7 @@ fun Message.toRow() = MessageRow(
 )
 
 fun MessageRow.toEntity() = Message(
-    id = id,
+    id = localId ?: id ?: 0L,
     contactId = contactId,
     sender = sender,
     text = text,

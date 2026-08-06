@@ -43,6 +43,25 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
     private lateinit var memoryUpdater: MemoryUpdater
     private lateinit var contactResolver: ContactResolver
 
+    private val respondedKeys = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
+
+    private val stopReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ACTION_STOP_LISTENING) {
+                Log.i(TAG, "Stop action received from foreground notification.")
+                serviceScope.launch {
+                    prefsRepo.updateAutoReplyEnabled(false)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         db = AppDatabase.getDatabase(this)
@@ -52,24 +71,77 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
         memoryUpdater = MemoryUpdater(db, ollamaRepo)
         contactResolver = ContactResolver(this)
         createAlertNotificationChannel()
+        createForegroundChannel()
+        promoteToForeground()
+        registerStopReceiver()
+    }
+
+    private fun registerStopReceiver() {
+        val filter = android.content.IntentFilter(ACTION_STOP_LISTENING)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(stopReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(stopReceiver, filter)
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            unregisterReceiver(stopReceiver)
+        } catch (_: Exception) {}
+    }
+
+    private fun createForegroundChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                FOREGROUND_CHANNEL_ID,
+                "AutoReply Control Service",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply { description = "Persistent notification indicating WhatsApp AutoReply service is active." }
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
+        }
+    }
+
+    private fun promoteToForeground() {
+        val notificationIntent = Intent(this, com.example.MainActivity::class.java)
+        val contentPendingIntent = PendingIntent.getActivity(
+            this, 0, notificationIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val stopIntent = Intent(ACTION_STOP_LISTENING).setPackage(packageName)
+        val stopPendingIntent = PendingIntent.getBroadcast(
+            this, 1, stopIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notification = NotificationCompat.Builder(this, FOREGROUND_CHANNEL_ID)
+            .setContentTitle("AutoReply is Active")
+            .setContentText("Listening to WhatsApp notifications & generating local AI replies.")
+            .setSmallIcon(android.R.drawable.ic_menu_send)
+            .setContentIntent(contentPendingIntent)
+            .setOngoing(true)
+            .addAction(android.R.drawable.ic_media_pause, "Stop", stopPendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(FOREGROUND_NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(FOREGROUND_NOTIFICATION_ID, notification)
+        }
     }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
         Log.i(TAG, "Notification listener connected to WhatsApp system stream.")
-        try {
-            AutoReplyForegroundService.startService(this)
-            serviceScope.launch {
-                db.activityLogDao().insert(
-                    ActivityLogEntry(
-                        timestamp = System.currentTimeMillis(),
-                        eventType = "LISTENER_CONNECTED",
-                        detail = "Connected to WhatsApp notification stream."
-                    )
+        serviceScope.launch {
+            db.activityLogDao().insert(
+                ActivityLogEntry(
+                    timestamp = System.currentTimeMillis(),
+                    eventType = "LISTENER_CONNECTED",
+                    detail = "Connected to WhatsApp notification stream."
                 )
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error starting foreground service from listener: ${e.message}")
+            )
         }
     }
 
@@ -100,14 +172,13 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        Log.i(TAG, "Task removed from recents. Re-starting foreground service and rebinding listener.")
-        try {
-            AutoReplyForegroundService.startService(this)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        Log.i(TAG, "Task removed from recents — listener remains foreground and bound.")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
                 requestRebind(android.content.ComponentName(this, WhatsAppNotificationListenerService::class.java))
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in onTaskRemoved: ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in onTaskRemoved: ${e.message}")
         }
     }
 
@@ -118,6 +189,16 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
         val pkgName = sbn.packageName ?: ""
         if (pkgName != "com.whatsapp" && pkgName != "com.whatsapp.w4b") {
             return
+        }
+
+        val notifKey = sbn.key
+        if (notifKey != null && respondedKeys.contains(notifKey)) return
+        notifKey?.let {
+            respondedKeys.add(it)
+            if (respondedKeys.size > 100) {
+                val iterator = respondedKeys.iterator()
+                if (iterator.hasNext()) { iterator.next(); iterator.remove() }
+            }
         }
 
         val notification = sbn.notification ?: return
@@ -182,13 +263,6 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
 
         serviceScope.launch {
             try {
-                // Ensure foreground control service is running
-                try {
-                    AutoReplyForegroundService.startService(this@WhatsAppNotificationListenerService)
-                } catch (e: Exception) {
-                    // ignore start failure if already running
-                }
-
                 // Check if Auto-Reply is globally enabled
                 val prefs = prefsRepo.userPreferencesFlow.first()
                 if (!prefs.autoReplyEnabled) {
@@ -561,5 +635,8 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
     companion object {
         private const val TAG = "WhatsAppListener"
         const val CHANNEL_ALERT_ID = "autoreply_alerts_channel"
+        const val FOREGROUND_CHANNEL_ID = "autoreply_foreground_channel"
+        const val FOREGROUND_NOTIFICATION_ID = 1001
+        const val ACTION_STOP_LISTENING = "com.example.service.STOP_LISTENING"
     }
 }

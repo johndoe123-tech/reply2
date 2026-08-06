@@ -53,11 +53,7 @@ fun MainAppNav() {
 
     LaunchedEffect(isAuthenticated.value) {
         if (isAuthenticated.value) {
-            try {
-                com.example.service.AutoReplyForegroundService.startService(context)
-            } catch (e: Exception) {
-                android.util.Log.e("MainAppNav", "Failed to auto-start foreground service: ${e.message}")
-            }
+            com.example.service.ListenerHealthWorker.schedule(context)
         }
     }
 

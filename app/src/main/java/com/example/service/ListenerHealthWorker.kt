@@ -27,11 +27,10 @@ class ListenerHealthWorker(
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
                     android.service.notification.NotificationListenerService.requestRebind(serviceComponent)
                 }
-                AutoReplyForegroundService.startService(context)
                 db.activityLogDao().insert(
                     ActivityLogEntry(
                         eventType = "HEALTH_CHECK",
-                        detail = "Listener re-bound & foreground service health check OK"
+                        detail = "Listener re-bound & service health check OK"
                     )
                 )
             } catch (e: Exception) {

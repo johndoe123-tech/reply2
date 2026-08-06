@@ -26,6 +26,9 @@ interface ContactDao {
     @Query("UPDATE contacts SET relationshipLabel = :label, doNotRespond = :doNotRespond, gender = :gender, allowOtherLanguages = :allowOtherLanguages WHERE contactId = :contactId")
     suspend fun updateContactControls(contactId: String, label: String, doNotRespond: Boolean, gender: String?, allowOtherLanguages: Boolean = true)
 
+    @Query("SELECT * FROM contacts")
+    suspend fun getAllContactsOnce(): List<Contact>
+
     @Query("DELETE FROM contacts WHERE contactId = :contactId")
     suspend fun deleteContact(contactId: String)
 }
@@ -41,6 +44,9 @@ interface ContactMemoryDao {
     @Query("SELECT * FROM contact_memories")
     fun getAllMemories(): Flow<List<ContactMemory>>
 
+    @Query("SELECT * FROM contact_memories")
+    suspend fun getAllOnce(): List<ContactMemory>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateMemory(memory: ContactMemory)
 
@@ -55,6 +61,9 @@ interface BehaviorProfileDao {
 
     @Query("SELECT * FROM behavior_profiles WHERE contactId = :contactId LIMIT 1")
     fun getProfileFlow(contactId: String): Flow<BehaviorProfile?>
+
+    @Query("SELECT * FROM behavior_profiles")
+    suspend fun getAllOnce(): List<BehaviorProfile>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateProfile(profile: BehaviorProfile)
@@ -73,6 +82,9 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages ORDER BY timestamp DESC LIMIT :limit")
     fun getRecentActivityFeed(limit: Int = 20): Flow<List<Message>>
+
+    @Query("SELECT * FROM messages")
+    suspend fun getAllOnce(): List<Message>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: Message): Long
@@ -97,6 +109,9 @@ interface PersonalMemoryDao {
 interface KnownRelationDao {
     @Query("SELECT * FROM known_relations ORDER BY name ASC")
     fun getAllKnownRelations(): Flow<List<KnownRelation>>
+
+    @Query("SELECT * FROM known_relations")
+    suspend fun getAllOnce(): List<KnownRelation>
 
     @Query("SELECT * FROM known_relations WHERE phoneNumber = :phoneNumber LIMIT 1")
     suspend fun getByPhoneNumber(phoneNumber: String): KnownRelation?

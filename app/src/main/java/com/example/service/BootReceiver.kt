@@ -24,8 +24,8 @@ class BootReceiver : BroadcastReceiver() {
                 try {
                     val userPrefs = prefs.userPreferencesFlow.first()
                     if (userPrefs.autoReplyEnabled) {
-                        Log.i("BootReceiver", "Starting AutoReplyForegroundService from BootReceiver...")
-                        AutoReplyForegroundService.startService(context)
+                        Log.i("BootReceiver", "Boot completed & auto-reply enabled. Scheduling health worker.")
+                        ListenerHealthWorker.schedule(context)
                     }
                 } catch (e: Exception) {
                     Log.e("BootReceiver", "Failed to start service on boot: ${e.message}")

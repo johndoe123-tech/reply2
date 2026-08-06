@@ -361,6 +361,17 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = { viewModel.forceFullSync() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("force_full_sync_button")
+                        ) {
+                            Icon(Icons.Default.Sync, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Force Full Sync to Cloud")
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
                         OutlinedButton(
                             onClick = {
                                 scope.launch {
